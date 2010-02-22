@@ -1,9 +1,9 @@
 module RubyAMF
   module IO
     class AMFDeserializer
-      
+
       require 'io/read_write'
-      
+
       include RubyAMF::AMF
       include RubyAMF::App
       include RubyAMF::Configuration
@@ -12,16 +12,16 @@ module RubyAMF
       include RubyAMF::IO::Constants
       include RubyAMF::VoHelper
       attr_accessor :stream
-      attr_accessor :stream_position      
+      attr_accessor :stream_position
       attr_accessor :amf0_object_default_members_ignore
-      
+
       def initialize
         @raw = true
         @rawkickoff = true
         @stream_position = 0
         reset_referencables
       end
-      
+
       #do an entire read operation on a complete amf request
       def rubyamf_read(amfobj)
         RequestStore.amf_encoding = 'amf0'
@@ -31,7 +31,7 @@ module RubyAMF
         headers
         bodys
       end
-      
+
       def reset_referencables
         @amf0_stored_objects = []
         @amf0_object_default_members_ignore = {}
@@ -40,17 +40,17 @@ module RubyAMF
         @stored_objects = []
         @stored_defs = []
       end
-      
+
       def preamble
         version = read_int8 #first byte, not anything important
         if version != 0 && version != 3
           raise RUBYAMFException.new(RUBYAMFException.VERSION_ERROR, "The amf version is incorrect")
         end
-        
+
         #read the client. (0x00 - Flash Player, 0x01 - FlashComm)
         client = read_int8
       end
-      
+
       def headers
         @amf0_object_default_members_ignore = {
           'Credentials' => true,
@@ -62,69 +62,69 @@ module RubyAMF
           'error'       => true,
           'trace'       => true,
           'm_debug'     => true}
-        
+
         #Find total number of header elements
         header_count = read_word16_network
-        
+
         0.upto(header_count - 1) do
-          
+
           #find the key of the header
           name = read_utf
-          
+
           #Find the must understand flag
           required = read_booleanr
-          
+
           #Grab the length of the header element
           length = read_word32_network
-          
+
           #Grab the type of the element
           type = read_byte
-          
+
           #Turn the element into real data
           value = read(type)
-          
+
           #create new header
           header = AMFHeader.new(name,required,value)
-          
+
           #add header to the amfbody object
           @amfobj.add_header(header)
         end
       end
-      
+
       def bodys
         @amf0_object_default_members_ignore = {}
-        
+
         #find the total number of body elements
         body_count = read_int16_network
-        
+
         #Loop over all the body elements
         0.upto(body_count - 1) do
-          
+
           reset_referencables
-          
+
           #The target method
           target = read_utf
-          
+
           #The unique id that the client understands
           response = read_utf
-          
+
           #Get the length of the body element
           length = read_word32_network
-          
+
           #Grab the type of the element
           type = read_byte
-          
+
           #Turn the argument elements into real data
           value = read(type)
-          
+
           #new body
           body = AMFBody.new(target,response,value)
-          
-          #add the body to the amfobj 
+
+          #add the body to the amfobj
           @amfobj.add_body(body)
-        end    
+        end
       end
-      
+
       #Reads object data by type from @input_stream
       def read(type)
         case type
@@ -169,7 +169,7 @@ module RubyAMF
           read_custom_class
         end
       end
-      
+
       #AMF3
       def read_amf3
         type = read_word8
@@ -186,7 +186,7 @@ module RubyAMF
           read_amf3_integer
         when AMF3_NUMBER
           read_number #read standard AMF0 number, a double
-        when AMF3_STRING 
+        when AMF3_STRING
           read_amf3_string
         when AMF3_XML
           read_amf3_xml_string
@@ -202,19 +202,19 @@ module RubyAMF
           read_amf3_byte_array
         end
       end
-      
+
       def read_amf3_integer
         n = 0
         b = read_word8||0
         result = 0
-        
+
         while ((b & 0x80) != 0 && n < 3)
           result = result << 7
           result = result | (b & 0x7f)
           b = read_word8||0
           n = n + 1
         end
-        
+
         if (n < 3)
           result = result << 7
           result = result | b
@@ -222,7 +222,7 @@ module RubyAMF
           #Use all 8 bits from the 4th byte
           result = result << 8
           result = result | b
-    	
+
           #Check if the integer should be negative
           if (result > AMF3_INTEGER_MAX)
             result -= (1 << 29)
@@ -230,7 +230,7 @@ module RubyAMF
         end
         return result
       end
-      
+
       def read_amf3_string
         type = read_amf3_integer
         isReference = (type & 0x01) == 0
@@ -245,9 +245,9 @@ module RubyAMF
             raise( RUBYAMFException.new(RUBYAMFException.UNDEFINED_STRING_REFERENCE_ERROR, "Reference to non existant string at index #{reference}, please tell aaron@rubyamf.org") )
           end
         else
-          
+
           length = type >> 1
-          
+
           #Note that we have to read the string into a byte buffer and then
           #convert to a UTF-8 string, because for standard readUTF() it
           #reads an unsigned short to get the string length.
@@ -255,19 +255,19 @@ module RubyAMF
           #thanks Karl von Randow for this
           if length > 0
             str = String.new(readn(length)) #specifically cast as string, as we're reading verbatim from the stream
-            str.toutf8 #convert to utf8
+            str.force_encoding("utf-8") #convert to utf8
             @stored_strings << str
           end
           return str
         end
       end
-      
+
       def read_amf3_xml
         type = read_amf3_integer
         length = type >> 1
         readn(length)
       end
-      
+
       def read_amf3_date
         type = read_amf3_integer
         isReference = (type & 0x01) == 0
@@ -275,7 +275,7 @@ module RubyAMF
           reference = type >> 1
           if reference < @stored_objects.length
             if @stored_objects[reference] == nil
-              
+
               raise( RUBYAMFException.new(RUBYAMFException.UNDEFINED_OBJECT_REFERENCE_ERROR, "Reference to non existant date at index #{reference}, please tell aaron@rubyamf.org"))
             end
             return @stored_objects[reference]
@@ -286,18 +286,18 @@ module RubyAMF
           seconds = read_double.to_f/1000
           time = if (seconds < 0) || ClassMappings.use_ruby_date_time # we can't use Time if its a negative second value
             DateTime.strptime(seconds.to_s, "%s")
-          else 
+          else
             Time.at(seconds)
           end
           @stored_objects << time
           time
         end
       end
-      
+
       def read_amf3_array
         type = read_amf3_integer
         isReference = (type & 0x01) == 0
-        
+
         if isReference
           reference = type >> 1
           if reference < @stored_objects.length
@@ -335,11 +335,11 @@ module RubyAMF
           array
         end
       end
-      
+
       def read_amf3_object
         type = read_amf3_integer
         isReference = (type & 0x01) == 0
-        
+
         if isReference
           reference = type >> 1
           if reference < @stored_objects.length
@@ -351,10 +351,10 @@ module RubyAMF
             raise( RUBYAMFException.new(RUBYAMFException.UNDEFINED_OBJECT_REFERENCE_ERROR, "Reference to non existant object #{reference}"))
           end
         else
-          
+
           class_type = type >> 1
           class_is_reference = (class_type & 0x01) == 0
-          
+
           if class_is_reference
             class_reference = class_type >> 1
             if class_reference < @stored_defs.length
@@ -367,50 +367,50 @@ module RubyAMF
             externalizable = (class_type & 0x02) != 0
             dynamic = (class_type & 0x04) != 0
             attribute_count = class_type >> 3
-            
+
             class_attributes = []
             attribute_count.times{class_attributes << read_amf3_string} # Read class members
-            
+
             class_definition = {"as_class_name" => actionscript_class_name, "members" => class_attributes, "externalizable" => externalizable, "dynamic" => dynamic}
             @stored_defs << class_definition
           end
           action_class_name = class_definition['as_class_name'] #get the className according to type
-          
+
           # check to see if its the first main amf object or a flex message obj, because then we need a _explicitType field type and skip some things
           skip_mapping = if action_class_name && action_class_name.include?("flex.messaging")
-            obj = VoHash.new # initialize an empty VoHash value holder    
+            obj = VoHash.new # initialize an empty VoHash value holder
             obj._explicitType = action_class_name
             true
           else
             obj = VoUtil.get_ruby_class(action_class_name).new
             false
           end
-            
+
           obj_position = @stored_objects.size # need to replace the object later for referencing (MUST be before inserting the object into stored_objs)
           @stored_objects << obj
-          
-          
+
+
           if class_definition['externalizable']
             if ['flex.messaging.io.ObjectProxy','flex.messaging.io.ArrayCollection'].include?(action_class_name)
               obj = read_amf3
             else
               raise( RUBYAMFException.new(RUBYAMFException.USER_ERROR, "Unable to read externalizable data type #{type}"))
-            end            
-          else            
+            end
+          else
             translate_case = !skip_mapping&&ClassMappings.translate_case  # remove the need for a method call / also, don't want to convert on main remoting object
             class_definition['members'].each do |key|
               value = read_amf3
               #if (value)&& value != 'NaN'# have to read key to move the reader ahead in the stream
-              key.to_snake! if translate_case   
+              key.to_snake! if translate_case
               VoUtil.set_value(obj, key, value)
               #end
             end
-            
+
             if class_definition['dynamic']
               while (key = read_amf3_string) && key.length != 0  do # read next key
                 value = read_amf3
                 #if (value) && value != 'NaN'
-                key.to_snake! if translate_case  
+                key.to_snake! if translate_case
                 VoUtil.set_value(obj, key, value)
                 #end
               end
@@ -420,7 +420,7 @@ module RubyAMF
           obj
         end
       end
-      
+
       def read_amf3_byte_array # according to the charles amf3 deserializer, they store byte array
         type = read_amf3_integer
         isReference = (type & 0x01) == 0
@@ -438,17 +438,17 @@ module RubyAMF
           length = type >> 1
           begin # first assume its gzipped and rescue an exception if its not
             inflated_stream = Zlib::Inflate.inflate( self.stream[self.stream_position,length] )
-            arr = inflated_stream.unpack('c'*inflated_stream.length) 
+            arr = inflated_stream.unpack('c'*inflated_stream.length)
           rescue Exception => e
             arr = self.stream[self.stream_position,length].unpack('c'*length)
-          end      
+          end
           self.stream_position += length
           @stored_objects << arr
           arr
         end
       end
-      
-      #AMF0  
+
+      #AMF0
       def read_number
         res = read_double
         res.is_a?(Float)&&res.nan? ? nil : res # check for NaN and convert them to nil
@@ -484,7 +484,7 @@ module RubyAMF
         #epoch time comes in millis, convert to seconds.
         seconds = read_double.to_f / 1000
 
-        #flash client timezone offset (which comes in minutes, 
+        #flash client timezone offset (which comes in minutes,
         #but incorrectly signed), convert to seconds, and fix the sign.
         client_zone_offset = (read_int16_network) * 60 * -1  # now we have seconds
 
@@ -493,19 +493,19 @@ module RubyAMF
 
         # adjust the timezone with the offsets
         seconds += (client_zone_offset - server_zone_offset)
-        
-        #TODO: handle daylight savings 
+
+        #TODO: handle daylight savings
         #sent_time_zone = sent.get_time_zone
         #we have to handle daylight savings ms as well
         #if (sent_time_zone.in_daylight_time(sent.get_time))
         #sent.set_time_in_millis(sent.get_time_in_millis - sent_time_zone.get_dst_savings)
         #end
-        
+
         #diff the timezone offset's and subtract from seconds
         #create a time object from the result
         if (seconds < 0) || ClassMappings.use_ruby_date_time # we can't use Time if its a negative second value
           DateTime.strptime(seconds.to_s, "%s")
-        else 
+        else
           Time.at(seconds)
         end
       end
@@ -556,3 +556,4 @@ module RubyAMF
     end
   end
 end
+

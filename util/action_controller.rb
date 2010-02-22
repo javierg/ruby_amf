@@ -25,20 +25,20 @@ class ActionController::Base
   attr_accessor :is_amf
   attr_accessor :is_rubyamf #-> for simeon :)-
   attr_accessor :rubyamf_params # this way they can always access the rubyamf_params
-  
+
   #Higher level "credentials" method that returns credentials wether or not
   #it was from setRemoteCredentials, or setCredentials
   def credentials
     empty_auth = {:username => nil, :password => nil}
     amf_credentials||html_credentials||empty_auth #return an empty auth, this watches out for being the cause of an exception, (nil[])
   end
-  
+
 private
   #setCredentials access
   def amf_credentials
     RubyAMF::App::RequestStore.rails_authentication
   end
-  
+
   #remoteObject setRemoteCredentials retrieval
  def html_credentials
     auth_data = request.env['RAW_POST_DATA']
@@ -51,12 +51,13 @@ private
       return nil
     end
     case RubyAMF::Configuration::ClassMappings.hash_key_access
-    when :string:
-      return {'username' => remote_auth[0], 'password' => remote_auth[1]}
-    when :symbol:
-      return {:username => remote_auth[0], :password => remote_auth[1]}
-    when :indifferent:
-      return HashWithIndifferentAccess.new({:username => remote_auth[0], :password => remote_auth[1]})
+      when :string then
+        return {'username' => remote_auth[0], 'password' => remote_auth[1]}
+      when :symbol then
+        return {:username => remote_auth[0], :password => remote_auth[1]}
+      when :indifferent then
+        return HashWithIndifferentAccess.new({:username => remote_auth[0], :password => remote_auth[1]})
     end
   end
 end
+
