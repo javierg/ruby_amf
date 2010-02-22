@@ -1,0 +1,9 @@
+= RubyAMF (testing on ruby 1.9)
+
+(c) aaron smith, aaron@rubyamf.org
+http://www.rubyamf.org
+http://code.google.com/p/rubyamf
+
+== Installation
+    script/plugin install git://github.com/voraz/ruby_amf.git
+
