@@ -2,25 +2,25 @@ module RubyAMF
   module VoHelper
     class VoHash < Hash
       attr_accessor :_explicitType
-
+      
       def ==(other)
         other.is_a?(VoHash) && !_explicitType.nil? && _explicitType == other._explicitType && super
       end
-
+      
     end
-
+    
     require 'app/configuration' # cant put this at the top because VoHash has to be instantiated for app/configuration to work
     class VoUtil
-
+      
       include RubyAMF::Configuration
       include RubyAMF::Exceptions
-
+      
       def self.get_ruby_class(action_class_name)
         mapping = ClassMappings.get_vo_mapping_for_actionscript_class(action_class_name)
         if mapping
           return mapping[:ruby].constantize
         else
-          begin
+          begin 
             assumed_class = action_class_name.constantize
             assumed_class.new
             assumable=true
@@ -31,25 +31,31 @@ module RubyAMF
               return assumed_class
             else
               case ClassMappings.hash_key_access
-                when :symbol      then return Hash
-                when :string      then return Hash
-                when :indifferent then return HashWithIndifferentAccess
+              when :symbol      then return Hash
+              when :string      then return Hash
+              when :indifferent then return HashWithIndifferentAccess
               end
-            end
+            end            
           end
         end
-      end
-
+      end      
+      
       def self.set_value(obj, key, value)
         if obj.kind_of?(ActiveRecord::Base)
           #ATTRIBUTE
-          attributes = obj.instance_variable_get('@attributes')
-          attribs = (obj.attribute_names + ["id"]).inject({}){|hash, attr| hash[attr]=true ; hash}
+          attributes = obj.instance_variable_get(:@attributes)
+          attribs = (obj.attribute_names + [obj.class.primary_key]).inject({}){|hash, attr| hash[attr]=true ; hash}
           mapping = ClassMappings.get_vo_mapping_for_ruby_class(obj.class.name)
-          if (!mapping && attribs[key]) ||
+          if (!mapping && attribs[key]) || 
             (mapping && !mapping[:ignore_fields].include?(key) && ClassMappings.attribute_names[mapping[:ruby]][key])
-            attributes[key] = value
-          #ASSOCIATION
+            # this sets the attributes using de method "key=" of the class
+            if value == false
+              obj.send("#{key}=", 'false')
+            else
+              obj.send("#{key}=", value)
+            end
+            #attributes[key] = value
+            #ASSOCIATION
           elsif reflection = obj.class.reflections[key.to_sym] # is it an association
             case reflection.macro
             when :has_one
@@ -61,38 +67,37 @@ module RubyAMF
             when :composed_of
               obj.send("#{key}=", value) if value # this sets the attributes to the corresponding values
             end
-          # build @methods hash
-          elsif
-            if mapping[:methods]
-              if !@methods
-                @methods = Hash.new
-              end
-              if !@methods[obj.class.name] #victorcoder: Fixed issue 107, method mapping for associations
-                @methods[obj.class.name]=Hash.new
-              end
-              mapping[:methods].each do |method|
-                if method == key
-                  @methods["#{key}"] = value
-                end
+          elsif mapping[:methods] && mapping[:methods].include?(key)
+            if !@methods
+              @methods = Hash.new
+            end
+            if !@methods[obj.class.name] #victorcoder: Fixed issue 107, method mapping for associations
+              @methods[obj.class.name]=Hash.new 
+            end
+            mapping[:methods].each do |method|
+              if method == key
+                @methods["#{key}"] = value
               end
             end
           else
-            obj.instance_variable_set("@#{key}", value)
+            obj.instance_variable_set("@#{key}".to_sym, value)
           end
         elsif obj.kind_of? Hash
           obj[key] = value
+        elsif obj.kind_of? Object
+          obj.instance_variable_set("@#{key}".to_sym, value)
         else
           raise RUBYAMFException.new(RUBYAMFException.VO_ERROR, "Argument, #{obj}, is not an ActiveRecord::Base or a Hash.")
         end
       end
-
+             
       def self.finalize_object(obj)
         if obj.kind_of? ActiveRecord::Base
-          attributes = obj.instance_variable_get('@attributes')
-          attributes.delete("id") if attributes["id"]==0 || attributes['id']==nil # id attribute cannot be zero or nil
+          attributes = obj.instance_variable_get(:@attributes)
+          attributes.delete(obj.class.primary_key) if attributes[obj.class.primary_key]==0 || attributes[obj.class.primary_key]==nil # primary key attribute cannot be zero or nil
           attributes['type']=obj.class.name if  attributes['type']==nil && obj.class.superclass!=ActiveRecord::Base #STI: Always need 'type' on subclasses.
-          attributes[obj.class.locking_column]=0 if obj.class.locking_column && attributes[obj.class.locking_column]==nil #Missing lock_version is equivalent to 0.
-          obj.instance_variable_set("@new_record", false) if attributes["id"] # the record already exists in the database
+          # attributes[obj.class.locking_column]=0 if obj.class.locking_column && attributes[obj.class.locking_column]==nil #Missing lock_version is equivalent to 0.
+          obj.instance_variable_set(:@new_record, false) if attributes[obj.class.primary_key] # the record already exists in the database
           #superstition
           if (obj.new_record?)
             obj.created_at = nil if obj.respond_to? "created_at"
@@ -108,20 +113,19 @@ module RubyAMF
           end
         end
       end
-
+      
       #moved logic here so AMF3 and AMF0 can use it
       def self.get_vo_for_incoming(obj,action_class_name)
-        p "porra do caralho 1"
         ruby_obj = VoUtil.get_ruby_class(action_class_name).new
-        if ruby_obj.kind_of?(ActiveRecord::Base)
+        if ruby_obj.kind_of?(ActiveRecord::Base) 
           obj.each_pair{|key, value| VoUtil.set_value(ruby_obj, key, value)}
           VoUtil.finalize_object(ruby_obj)
           return ruby_obj
         else
           case ClassMappings.hash_key_access
-            when :symbol      then return obj.symbolize_keys!
-            when :string      then return obj # by default the keys are a string type, so just return the obj
-            when :indifferent then return HashWithIndifferentAccess.new(obj)
+          when :symbol      then return obj.symbolize_keys!
+          when :string      then return obj # by default the keys are a string type, so just return the obj
+          when :indifferent then return HashWithIndifferentAccess.new(obj)
           # else  # TODO: maybe add a raise FlexError since they somehow put the wrong value for this feature
           end
         end
@@ -133,7 +137,8 @@ module RubyAMF
         instance_vars = obj.instance_variables
         methods = []
         if map = ClassMappings.get_vo_mapping_for_ruby_class(obj.class.to_s)
-          if map[:type]=="active_record"
+          # Change to accept active_resource requests
+          if map[:type] == "active_record" || map[:type]=="active_resource"
             attributes_hash = obj.attributes
             (map[:attributes]||attributes_hash.keys).each do |attr| # need to use dup because sometimes the attr is frozen from the AR attributes hash
               attr_name = attr
@@ -147,9 +152,9 @@ module RubyAMF
                 instance_vars << ("@"+assoc) if obj.send(assoc) # this will make sure they are instantiated and only load it if they have a value.
               end
             elsif ClassMappings.check_for_associations
-              instance_vars = obj.instance_variables.reject{|assoc| ["@attributes","@new_record","@read_only","@attributes_cache"].include?(assoc)}
+              instance_vars = obj.instance_variables.reject{|assoc| [:@attributes,:@new_record,:@read_only,:@attributes_cache].include?(assoc.to_sym)}
             end
-
+            
             # if there are AR methods they want in the AS object as an attribute, see about them here.
             if map[:methods]
               map[:methods].each do |method|
@@ -157,7 +162,7 @@ module RubyAMF
               end
             end
           end
-          new_object._explicitType = map[:actionscript] # Aryk: This only works on the Hash because rubyAMF extended class Object to have this accessor, probably not the best idea, but its already there.
+          new_object._explicitType = map[:actionscript] # Aryk: This only works on the Hash because rubyAMF extended class Object to have this accessor, probably not the best idea, but its already there.   
           # Tony: There's some duplication in here. Had trouble consolidating the logic though. Ruby skills failed.
         elsif ClassMappings.assume_types
           new_object._explicitType = obj.class.to_s
@@ -169,7 +174,7 @@ module RubyAMF
             end
             instance_vars = []
             if ClassMappings.check_for_associations
-              instance_vars = obj.instance_variables.reject{|assoc| ["@attributes","@new_record","@read_only","@attributes_cache"].include?(assoc)}
+              instance_vars = obj.instance_variables.reject{|assoc| [:@attributes,:@new_record,:@read_only,:@attributes_cache].include?(assoc.to_sym)}
             end
           end
         end
@@ -192,4 +197,3 @@ module RubyAMF
     end
   end
 end
-

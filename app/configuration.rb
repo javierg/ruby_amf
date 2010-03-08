@@ -25,7 +25,7 @@ module RubyAMF
       # Aryk: I cleaned up how the class variables are called here. It doesnt matter if you use class variables or instance variables on the class level. Check out this simple tutorial
       # - http://sporkmonger.com/2007/2/19/instance-variables-class-variables-and-inheritance-in-ruby      
      
-      class << self           
+      class << self
         include RubyAMF::App
         include RubyAMF::Exceptions 
         
@@ -38,10 +38,14 @@ module RubyAMF
           ClassMappings.ignore_fields.to_a.each{|k| hashed_ignores[k] = true} # strings and nils will be put into an array with to_a
           mapping[:ignore_fields].to_a.each{|k| hashed_ignores[k] = true}
           mapping[:ignore_fields] = hashed_ignores # overwrite the original ignore fields
+          mapping[:parameter_mapping] = mapping[:parameter_mapping] || Hash.new
 
-          # if they specify custom attributes, ensure that AR ids are being passed as well if they opt for it.
-          if force_active_record_ids && mapping[:attributes] && mapping[:type]=="active_record" && !mapping[:attributes].include?("id")
-            mapping[:attributes] << "id"
+          # if they specify custom attributes, ensure that AR primary_keys are being passed as well if they opt for it.
+          if force_active_record_ids && mapping[:attributes] && mapping[:type]=="active_record"
+            rubyobj = mapping[:ruby].constantize.new
+            if !mapping[:attributes].include?(rubyobj.class.primary_key)
+              mapping[:attributes] << rubyobj.class.primary_key
+            end
           end
           
           # created caching hashes for mapping
@@ -51,9 +55,13 @@ module RubyAMF
           # for deserialization - looking up in a hash is faster than looking up in an array.
           begin
             if mapping[:type] == "active_record" 
-              @attribute_names[mapping[:ruby]] = (mapping[:ruby].constantize.new.attribute_names + ["id"]).inject({}){|hash, attr| hash[attr]=true ; hash} # include the id attribute
+              rubyobj = mapping[:ruby].constantize.new
+              @attribute_names[mapping[:ruby]] = (rubyobj.attribute_names + [rubyobj.class.primary_key]).inject({}){|hash, attr| hash[attr]=true ; hash} # include the id attribute
+            # Change to accept active_resource requests
+            elsif mapping[:type] == "active_resource"
+              @attribute_names[mapping[:ruby]] = (mapping[:ruby].constantize.new.instance_variable_names + ["id"]).inject({}){|hash, attr| hash[attr]=true ; hash} # include the id attribute
             end
-          rescue StandardError => e
+          rescue ActiveRecord::StatementInvalid => e
             # This error occurs during migrations, since the AR constructed above will check its columns, but the table won't exist yet.
             # We'll ignore the error if we're migrating.
             raise unless ARGV.include?("migrate") or ARGV.include?("db:migrate") or ARGV.include?("rollback") or ARGV.include?("db:rollback")
@@ -65,7 +73,9 @@ module RubyAMF
           scoped_class_mapping[@current_mapping_scope] ||= (if vo_mapping = @class_mappings_by_ruby_class[ruby_class]
               vo_mapping = vo_mapping.dup # need to duplicate it or else we will overwrite the keys from the original mappings
               vo_mapping[:attributes]   = vo_mapping[:attributes][@current_mapping_scope]||[]   if vo_mapping[:attributes].is_a?(Hash)      # don't include any of these attributes if there is no scope
-              vo_mapping[:associations] = vo_mapping[:associations][@current_mapping_scope]||[] if vo_mapping[:associations].is_a?(Hash) # don't include any of these attributes
+              vo_mapping[:associations] = vo_mapping[:associations][@current_mapping_scope]||[] if vo_mapping[:associations].is_a?(Hash)    # don't include any of these attributes
+              #Change to use methods with de mapping_scope 
+              vo_mapping[:methods] = vo_mapping[:methods][@current_mapping_scope]||[] if vo_mapping[:methods].is_a?(Hash)    # don't include any of these attributes
               vo_mapping
             end
           )
@@ -98,7 +108,7 @@ module RubyAMF
               if scaffolding && val.is_a?(ActiveRecord::Base)
                 request_params[k.to_sym] = val.attributes.dup
                 val.instance_variables.each do |assoc|
-                  next if "@new_record" == assoc
+                  next if :@new_record == assoc.to_sym
                   request_params[k.to_sym][assoc[1..-1]] = val.instance_variable_get(assoc)
                 end
               else
@@ -114,7 +124,7 @@ module RubyAMF
                     key = first.class.to_s.to_snake!.downcase.to_sym # a generated scaffold expects params in snake_case, rubyamf_params gets them for consistency in scaffolding
                     rubyamf_params[key] = first.attributes.dup
                     first.instance_variables.each do |assoc|
-                      next if "@new_record" == assoc
+                      next if :@new_record == assoc.to_sym
                       rubyamf_params[key][assoc[1..-1]] = first.instance_variable_get(assoc)
                     end
                     if always_add_to_params #if wanted in params, put it in
