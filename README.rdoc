@@ -5,5 +5,5 @@ http://www.rubyamf.org
 http://code.google.com/p/rubyamf
 
 == Installation
-    script/plugin install git://github.com/voraz/ruby_amf.git
+    script/plugin install git://github.com/jdtornow/ruby_amf.git
 
