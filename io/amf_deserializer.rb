@@ -24,7 +24,7 @@ module RubyAMF
 
       #do an entire read operation on a complete amf request
       def rubyamf_read(amfobj)
-        RequestStore.amf_encoding = 'amf0'
+        RequestStore.amf_encoding = 'amf0' unless defined? RequestStore.amf_encoding
         @amfobj = amfobj
         @stream = @amfobj.input_stream
         preamble
